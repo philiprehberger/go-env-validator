@@ -2,7 +2,9 @@
 package envvalidator
 
 import (
+	"encoding"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"reflect"
@@ -145,21 +147,30 @@ func setField(field reflect.Value, raw string, name string) error {
 			field.Set(reflect.ValueOf(d))
 			return nil
 		}
-		n, err := strconv.ParseInt(raw, 10, 64)
+		bitSize := field.Type().Bits()
+		n, err := strconv.ParseInt(raw, 10, bitSize)
 		if err != nil {
-			return fmt.Errorf("%s: cannot convert '%s' to int", name, raw)
+			return fmt.Errorf("%s: cannot convert '%s' to %s", name, raw, field.Type())
 		}
 		field.SetInt(n)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		n, err := strconv.ParseUint(raw, 10, 64)
+		bitSize := field.Type().Bits()
+		n, err := strconv.ParseUint(raw, 10, bitSize)
 		if err != nil {
-			return fmt.Errorf("%s: cannot convert '%s' to uint", name, raw)
+			return fmt.Errorf("%s: cannot convert '%s' to %s", name, raw, field.Type())
 		}
 		field.SetUint(n)
 	case reflect.Float32, reflect.Float64:
-		f, err := strconv.ParseFloat(raw, 64)
+		bitSize := 64
+		if field.Kind() == reflect.Float32 {
+			bitSize = 32
+		}
+		f, err := strconv.ParseFloat(raw, bitSize)
 		if err != nil {
-			return fmt.Errorf("%s: cannot convert '%s' to float", name, raw)
+			return fmt.Errorf("%s: cannot convert '%s' to %s", name, raw, field.Type())
+		}
+		if bitSize == 32 && (f > math.MaxFloat32 || f < -math.MaxFloat32) {
+			return fmt.Errorf("%s: value '%s' overflows float32", name, raw)
 		}
 		field.SetFloat(f)
 	case reflect.Bool:
@@ -177,6 +188,15 @@ func setField(field reflect.Value, raw string, name string) error {
 			}
 			field.Set(reflect.ValueOf(*u))
 			return nil
+		}
+		// Check for encoding.TextUnmarshaler interface
+		if field.CanAddr() {
+			if tu, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
+				if err := tu.UnmarshalText([]byte(raw)); err != nil {
+					return fmt.Errorf("%s: failed to unmarshal '%s': %w", name, raw, err)
+				}
+				return nil
+			}
 		}
 		return fmt.Errorf("%s: unsupported type %s", name, field.Type())
 	}

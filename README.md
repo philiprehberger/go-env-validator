@@ -66,6 +66,7 @@ if err := envvalidator.Validate(&cfg); err != nil {
 - `bool` — accepts `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE`
 - `time.Duration` — Go duration strings (e.g., `"30s"`, `"5m"`, `"1h30m"`)
 - `url.URL` — parsed via `url.Parse`
+- Any type implementing `encoding.TextUnmarshaler`
 
 ### Tag Options
 

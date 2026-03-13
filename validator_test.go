@@ -2,10 +2,28 @@ package envvalidator
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
+
+// netAddr implements encoding.TextUnmarshaler for testing
+type netAddr struct {
+	Host string
+	Port string
+}
+
+func (a *netAddr) UnmarshalText(text []byte) error {
+	parts := strings.SplitN(string(text), ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid address: missing colon")
+	}
+	a.Host = parts[0]
+	a.Port = parts[1]
+	return nil
+}
 
 // String types
 
@@ -392,6 +410,67 @@ func TestUnsupportedType(t *testing.T) {
 	err := ValidateFrom(&cfg, map[string]string{"C": "value"})
 	if err == nil {
 		t.Fatal("expected error for unsupported type")
+	}
+}
+
+func TestInt8Overflow(t *testing.T) {
+	type Config struct {
+		Small int8 `env:"SMALL"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"SMALL": "200"})
+	if err == nil {
+		t.Fatal("expected error for int8 overflow (200 > 127)")
+	}
+}
+
+func TestUint8Overflow(t *testing.T) {
+	type Config struct {
+		Small uint8 `env:"SMALL"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"SMALL": "300"})
+	if err == nil {
+		t.Fatal("expected error for uint8 overflow (300 > 255)")
+	}
+}
+
+func TestInt8Valid(t *testing.T) {
+	type Config struct {
+		Small int8 `env:"SMALL"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"SMALL": "127"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Small != 127 {
+		t.Fatalf("expected 127, got %d", cfg.Small)
+	}
+}
+
+func TestTextUnmarshaler(t *testing.T) {
+	type Config struct {
+		Addr netAddr `env:"ADDR"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"ADDR": "192.168.1.1:8080"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Addr.Host != "192.168.1.1" || cfg.Addr.Port != "8080" {
+		t.Fatalf("expected 192.168.1.1:8080, got %s:%s", cfg.Addr.Host, cfg.Addr.Port)
+	}
+}
+
+func TestTextUnmarshalerError(t *testing.T) {
+	type Config struct {
+		Addr netAddr `env:"ADDR"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"ADDR": "no-colon"})
+	if err == nil {
+		t.Fatal("expected error for invalid TextUnmarshaler input")
 	}
 }
 
