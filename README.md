@@ -59,9 +59,19 @@ if err := envvalidator.Validate(&cfg); err != nil {
 
 ### Supported Types
 
-- `string`, `int`, `int64`, `uint`, `float64`, `bool`
-- `time.Duration` (e.g., `"30s"`, `"5m"`)
-- `url.URL`
+- `string`
+- `int`, `int8`, `int16`, `int32`, `int64`
+- `uint`, `uint8`, `uint16`, `uint32`, `uint64`
+- `float32`, `float64`
+- `bool` — accepts `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE`
+- `time.Duration` — Go duration strings (e.g., `"30s"`, `"5m"`, `"1h30m"`)
+- `url.URL` — parsed via `url.Parse`
+
+### Tag Options
+
+- `required` — field must be set in environment
+- `default=VALUE` — fallback if not set (validated against `choices` if both present)
+- `choices=A|B|C` — restrict to specific values (whitespace around `|` is trimmed)
 
 ## License
 

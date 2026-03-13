@@ -69,6 +69,12 @@ func ValidateFrom(dst any, source map[string]string) error {
 			continue
 		}
 
+		// Validate default values against choices
+		if opts.defaultVal != "" && len(opts.choices) > 0 && !contains(opts.choices, opts.defaultVal) {
+			errs = append(errs, fmt.Sprintf("%s: default value '%s' is not one of [%s]", name, opts.defaultVal, strings.Join(opts.choices, ", ")))
+			continue
+		}
+
 		if err := setField(v.Field(i), raw, name); err != nil {
 			errs = append(errs, err.Error())
 		}
@@ -99,7 +105,11 @@ func parseTag(tag string) (string, tagOpts) {
 		case strings.HasPrefix(p, "default="):
 			opts.defaultVal = strings.TrimPrefix(p, "default=")
 		case strings.HasPrefix(p, "choices="):
-			opts.choices = strings.Split(strings.TrimPrefix(p, "choices="), "|")
+			raw := strings.Split(strings.TrimPrefix(p, "choices="), "|")
+			opts.choices = make([]string, len(raw))
+			for i, c := range raw {
+				opts.choices[i] = strings.TrimSpace(c)
+			}
 		}
 	}
 
