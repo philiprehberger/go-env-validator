@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Add badges and Development section to README
+
 ## 0.3.0
 
 - Fix integer overflow for sized int/uint types (`int8`, `int16`, `uint8`, etc.) by parsing with correct bit size

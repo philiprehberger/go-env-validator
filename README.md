@@ -1,5 +1,9 @@
 # go-env-validator
 
+[![CI](https://github.com/philiprehberger/go-env-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-env-validator/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-env-validator.svg)](https://pkg.go.dev/github.com/philiprehberger/go-env-validator)
+[![License](https://img.shields.io/github/license/philiprehberger/go-env-validator)](LICENSE)
+
 Struct-based environment variable validation with batch error reporting for Go.
 
 ## Installation
@@ -73,6 +77,13 @@ if err := envvalidator.Validate(&cfg); err != nil {
 - `required` — field must be set in environment
 - `default=VALUE` — fallback if not set (validated against `choices` if both present)
 - `choices=A|B|C` — restrict to specific values (whitespace around `|` is trimmed)
+
+## Development
+
+```bash
+go test ./...
+go vet ./...
+```
 
 ## License
 
