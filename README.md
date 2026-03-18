@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-env-validator.svg)](https://pkg.go.dev/github.com/philiprehberger/go-env-validator)
 [![License](https://img.shields.io/github/license/philiprehberger/go-env-validator)](LICENSE)
 
-Struct-based environment variable validation with batch error reporting for Go.
+Struct-based environment variable validation with batch error reporting for Go
 
 ## Installation
 
@@ -77,6 +77,15 @@ if err := envvalidator.Validate(&cfg); err != nil {
 - `required` — field must be set in environment
 - `default=VALUE` — fallback if not set (validated against `choices` if both present)
 - `choices=A|B|C` — restrict to specific values (whitespace around `|` is trimmed)
+
+## API
+
+| Function / Method | Description |
+|---|---|
+| `Validate(dst any) error` | Populate struct from environment variables and validate |
+| `ValidateFrom(dst any, source map[string]string) error` | Populate struct from a map instead of os.Getenv |
+| `ValidationError` | Error type containing all validation errors |
+| `(*ValidationError) Error() string` | Format all collected errors as a single string |
 
 ## Development
 
