@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Add slice support — delimited env values populate slices of any supported scalar type (`[]string`, `[]int`, `[]bool`, etc.)
+- Add `delim=` tag option to configure the slice element separator (default `,`)
+- Validate `choices` per element for slice fields
+- Add nested-struct support via the `envPrefix` tag — recurse into `struct`/`*struct` fields with a composed variable-name prefix
+- Add the required package card image to the README
+
 ## 0.3.3
 
 - Standardize README to 3-badge format with emoji Support section

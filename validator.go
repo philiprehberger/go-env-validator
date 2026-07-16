@@ -41,46 +41,8 @@ func ValidateFrom(dst any, source map[string]string) error {
 		return fmt.Errorf("envvalidator: dst must be a pointer to a struct")
 	}
 
-	v = v.Elem()
-	t := v.Type()
 	var errs []string
-
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		tag := field.Tag.Get("env")
-		if tag == "" {
-			continue
-		}
-
-		name, opts := parseTag(tag)
-		raw := getEnv(name, source)
-
-		if raw == "" {
-			if opts.defaultVal != "" {
-				raw = opts.defaultVal
-			} else if opts.required {
-				errs = append(errs, fmt.Sprintf("missing required variable: %s", name))
-				continue
-			} else {
-				continue
-			}
-		}
-
-		if len(opts.choices) > 0 && !contains(opts.choices, raw) {
-			errs = append(errs, fmt.Sprintf("%s must be one of [%s], got '%s'", name, strings.Join(opts.choices, ", "), raw))
-			continue
-		}
-
-		// Validate default values against choices
-		if opts.defaultVal != "" && len(opts.choices) > 0 && !contains(opts.choices, opts.defaultVal) {
-			errs = append(errs, fmt.Sprintf("%s: default value '%s' is not one of [%s]", name, opts.defaultVal, strings.Join(opts.choices, ", ")))
-			continue
-		}
-
-		if err := setField(v.Field(i), raw, name); err != nil {
-			errs = append(errs, err.Error())
-		}
-	}
+	validateStruct(v.Elem(), source, "", &errs)
 
 	if len(errs) > 0 {
 		return &ValidationError{Errors: errs}
@@ -88,16 +50,97 @@ func ValidateFrom(dst any, source map[string]string) error {
 	return nil
 }
 
+// validateStruct walks the fields of v, applying prefix to every env name.
+// Nested structs tagged with `envPrefix` are recursed into with the prefix
+// extended, allowing related configuration to be grouped.
+func validateStruct(v reflect.Value, source map[string]string, prefix string, errs *[]string) {
+	t := v.Type()
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		// Nested config struct: recurse with an extended prefix.
+		if sub, ok := field.Tag.Lookup("envPrefix"); ok {
+			nested, ok := structValue(v.Field(i))
+			if !ok {
+				*errs = append(*errs, fmt.Sprintf("%s: envPrefix requires a struct or *struct field", field.Name))
+				continue
+			}
+			validateStruct(nested, source, prefix+sub, errs)
+			continue
+		}
+
+		tag := field.Tag.Get("env")
+		if tag == "" {
+			continue
+		}
+
+		name, opts := parseTag(tag)
+		name = prefix + name
+		raw := getEnv(name, source)
+
+		if raw == "" {
+			if opts.defaultVal != "" {
+				raw = opts.defaultVal
+			} else if opts.required {
+				*errs = append(*errs, fmt.Sprintf("missing required variable: %s", name))
+				continue
+			} else {
+				continue
+			}
+		}
+
+		isSlice := v.Field(i).Kind() == reflect.Slice
+
+		// For scalars, choices are validated against the whole value; for
+		// slices they are validated per element inside setField.
+		if !isSlice && len(opts.choices) > 0 && !contains(opts.choices, raw) {
+			*errs = append(*errs, fmt.Sprintf("%s must be one of [%s], got '%s'", name, strings.Join(opts.choices, ", "), raw))
+			continue
+		}
+
+		// Validate scalar default values against choices.
+		if !isSlice && opts.defaultVal != "" && len(opts.choices) > 0 && !contains(opts.choices, opts.defaultVal) {
+			*errs = append(*errs, fmt.Sprintf("%s: default value '%s' is not one of [%s]", name, opts.defaultVal, strings.Join(opts.choices, ", ")))
+			continue
+		}
+
+		if err := setField(v.Field(i), raw, name, opts); err != nil {
+			*errs = append(*errs, err.Error())
+		}
+	}
+}
+
+// structValue returns the addressable struct value for a nested field,
+// allocating a *struct if it is nil. The second return is false if the field
+// is neither a struct nor a pointer to one.
+func structValue(field reflect.Value) (reflect.Value, bool) {
+	if field.Kind() == reflect.Ptr {
+		if field.Type().Elem().Kind() != reflect.Struct {
+			return reflect.Value{}, false
+		}
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		return field.Elem(), true
+	}
+	if field.Kind() == reflect.Struct {
+		return field, true
+	}
+	return reflect.Value{}, false
+}
+
 type tagOpts struct {
 	required   bool
 	defaultVal string
 	choices    []string
+	delim      string
 }
 
 func parseTag(tag string) (string, tagOpts) {
 	parts := strings.Split(tag, ",")
 	name := parts[0]
-	opts := tagOpts{}
+	opts := tagOpts{delim: ","}
 
 	for _, p := range parts[1:] {
 		p = strings.TrimSpace(p)
@@ -106,6 +149,10 @@ func parseTag(tag string) (string, tagOpts) {
 			opts.required = true
 		case strings.HasPrefix(p, "default="):
 			opts.defaultVal = strings.TrimPrefix(p, "default=")
+		case strings.HasPrefix(p, "delim="):
+			if d := strings.TrimPrefix(p, "delim="); d != "" {
+				opts.delim = d
+			}
 		case strings.HasPrefix(p, "choices="):
 			raw := strings.Split(strings.TrimPrefix(p, "choices="), "|")
 			opts.choices = make([]string, len(raw))
@@ -134,7 +181,29 @@ func contains(ss []string, s string) bool {
 	return false
 }
 
-func setField(field reflect.Value, raw string, name string) error {
+// setField dispatches a raw string to the appropriate setter. Slice fields are
+// split on opts.delim and each element is converted individually (and checked
+// against choices, if any); all other fields go through setScalar.
+func setField(field reflect.Value, raw string, name string, opts tagOpts) error {
+	if field.Kind() == reflect.Slice {
+		parts := strings.Split(raw, opts.delim)
+		slice := reflect.MakeSlice(field.Type(), len(parts), len(parts))
+		for i, p := range parts {
+			p = strings.TrimSpace(p)
+			if len(opts.choices) > 0 && !contains(opts.choices, p) {
+				return fmt.Errorf("%s must be one of [%s], got '%s'", name, strings.Join(opts.choices, ", "), p)
+			}
+			if err := setScalar(slice.Index(i), p, name); err != nil {
+				return err
+			}
+		}
+		field.Set(slice)
+		return nil
+	}
+	return setScalar(field, raw, name)
+}
+
+func setScalar(field reflect.Value, raw string, name string) error {
 	switch field.Kind() {
 	case reflect.String:
 		field.SetString(raw)

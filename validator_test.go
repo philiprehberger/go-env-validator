@@ -474,6 +474,209 @@ func TestTextUnmarshalerError(t *testing.T) {
 	}
 }
 
+// Slices
+
+func TestStringSlice(t *testing.T) {
+	type Config struct {
+		Hosts []string `env:"HOSTS"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"HOSTS": "a,b,c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Hosts) != 3 || cfg.Hosts[0] != "a" || cfg.Hosts[2] != "c" {
+		t.Fatalf("expected [a b c], got %v", cfg.Hosts)
+	}
+}
+
+func TestIntSlice(t *testing.T) {
+	type Config struct {
+		Ports []int `env:"PORTS"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"PORTS": "80, 443, 8080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Ports) != 3 || cfg.Ports[0] != 80 || cfg.Ports[1] != 443 || cfg.Ports[2] != 8080 {
+		t.Fatalf("expected [80 443 8080], got %v", cfg.Ports)
+	}
+}
+
+func TestBoolSlice(t *testing.T) {
+	type Config struct {
+		Flags []bool `env:"FLAGS"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"FLAGS": "true,0,t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Flags) != 3 || !cfg.Flags[0] || cfg.Flags[1] || !cfg.Flags[2] {
+		t.Fatalf("expected [true false true], got %v", cfg.Flags)
+	}
+}
+
+func TestSliceCustomDelim(t *testing.T) {
+	type Config struct {
+		Ports []int `env:"PORTS,delim=;"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"PORTS": "80;443"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Ports) != 2 || cfg.Ports[0] != 80 || cfg.Ports[1] != 443 {
+		t.Fatalf("expected [80 443], got %v", cfg.Ports)
+	}
+}
+
+func TestSliceDefault(t *testing.T) {
+	// A slice default containing the delimiter must use a non-comma delim,
+	// since the env tag itself is comma-separated.
+	type Config struct {
+		Hosts []string `env:"HOSTS,delim=;,default=x;y"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Hosts) != 2 || cfg.Hosts[0] != "x" || cfg.Hosts[1] != "y" {
+		t.Fatalf("expected [x y] from default, got %v", cfg.Hosts)
+	}
+}
+
+func TestSliceChoicesPerElement(t *testing.T) {
+	type Config struct {
+		Levels []string `env:"LEVELS,choices=lo|hi"`
+	}
+	var cfg Config
+	if err := ValidateFrom(&cfg, map[string]string{"LEVELS": "lo,hi,lo"}); err != nil {
+		t.Fatalf("expected valid elements to pass, got %v", err)
+	}
+	var bad Config
+	if err := ValidateFrom(&bad, map[string]string{"LEVELS": "lo,nope"}); err == nil {
+		t.Fatal("expected error for element not in choices")
+	}
+}
+
+func TestSliceInvalidElement(t *testing.T) {
+	type Config struct {
+		Ports []int `env:"PORTS"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"PORTS": "80,notaport"})
+	if err == nil {
+		t.Fatal("expected error for invalid int element")
+	}
+}
+
+func TestSliceOptionalLeftNil(t *testing.T) {
+	type Config struct {
+		Hosts []string `env:"HOSTS"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hosts != nil {
+		t.Fatalf("expected nil slice for unset optional, got %v", cfg.Hosts)
+	}
+}
+
+// Nested structs
+
+func TestNestedStruct(t *testing.T) {
+	type DB struct {
+		Host string `env:"HOST"`
+		Port int    `env:"PORT"`
+	}
+	type Config struct {
+		Database DB `envPrefix:"DB_"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"DB_HOST": "db.local", "DB_PORT": "5432"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.Host != "db.local" || cfg.Database.Port != 5432 {
+		t.Fatalf("nested fields not populated: %+v", cfg.Database)
+	}
+}
+
+func TestNestedStructDefaultsAndRequired(t *testing.T) {
+	type DB struct {
+		Host string `env:"HOST,default=localhost"`
+		User string `env:"USER,required"`
+	}
+	type Config struct {
+		Database DB `envPrefix:"DB_"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{})
+	var ve *ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected ValidationError for missing DB_USER, got %v", err)
+	}
+	if len(ve.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(ve.Errors), ve.Errors)
+	}
+	if cfg.Database.Host != "localhost" {
+		t.Fatalf("expected nested default applied, got %q", cfg.Database.Host)
+	}
+}
+
+func TestNestedPointerStruct(t *testing.T) {
+	type DB struct {
+		Host string `env:"HOST,default=localhost"`
+	}
+	type Config struct {
+		Database *DB `envPrefix:"DB_"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"DB_HOST": "db.local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database == nil || cfg.Database.Host != "db.local" {
+		t.Fatalf("nil-pointer nested struct not allocated/populated: %+v", cfg.Database)
+	}
+}
+
+func TestNestedPrefixCompose(t *testing.T) {
+	type Inner struct {
+		Val string `env:"VAL"`
+	}
+	type Middle struct {
+		Inner Inner `envPrefix:"INNER_"`
+	}
+	type Config struct {
+		Mid Middle `envPrefix:"MID_"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{"MID_INNER_VAL": "deep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Mid.Inner.Val != "deep" {
+		t.Fatalf("expected composed prefix MID_INNER_VAL, got %q", cfg.Mid.Inner.Val)
+	}
+}
+
+func TestEnvPrefixOnNonStruct(t *testing.T) {
+	type Config struct {
+		Bad string `envPrefix:"X_"`
+	}
+	var cfg Config
+	err := ValidateFrom(&cfg, map[string]string{})
+	if err == nil {
+		t.Fatal("expected error for envPrefix on a non-struct field")
+	}
+}
+
 func TestMultipleFields(t *testing.T) {
 	type Config struct {
 		Host    string        `env:"HOST,default=localhost"`

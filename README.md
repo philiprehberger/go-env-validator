@@ -4,6 +4,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-env-validator.svg)](https://pkg.go.dev/github.com/philiprehberger/go-env-validator)
 [![Last updated](https://img.shields.io/github/last-commit/philiprehberger/go-env-validator)](https://github.com/philiprehberger/go-env-validator/commits/main)
 
+![go-env-validator](https://raw.githubusercontent.com/philiprehberger/go-env-validator/main/package-card.webp)
+
 Struct-based environment variable validation with batch error reporting for Go
 
 ## Installation
@@ -48,6 +50,52 @@ err := envvalidator.ValidateFrom(&cfg, map[string]string{
 })
 ```
 
+### Slices
+
+Delimited values populate slices of any supported scalar type. The default
+delimiter is `,`; override it per field with `delim=`.
+
+```go
+import "github.com/philiprehberger/go-env-validator"
+
+type Config struct {
+    Hosts []string `env:"HOSTS"`          // "a,b,c"  -> [a b c]
+    Ports []int    `env:"PORTS,delim=;"`  // "80;443" -> [80 443]
+}
+
+// HOSTS="api.example.com,web.example.com" PORTS="80;443"
+var cfg Config
+_ = envvalidator.Validate(&cfg)
+```
+
+`choices` is validated per element for slices. Because the `env` tag is itself
+comma-separated, a slice `default` that contains commas must use a non-comma
+`delim` (e.g. `env:"HOSTS,delim=;,default=a;b"`).
+
+### Nested Config
+
+Group related variables into nested structs. A field tagged with `envPrefix`
+is recursed into, and the prefix is prepended to every child variable name.
+Prefixes compose across nesting levels, and `*struct` fields are allocated
+automatically.
+
+```go
+import "github.com/philiprehberger/go-env-validator"
+
+type DB struct {
+    Host string `env:"HOST,default=localhost"`
+    Port int    `env:"PORT,default=5432"`
+}
+
+type Config struct {
+    Database DB `envPrefix:"DB_"` // reads DB_HOST, DB_PORT
+}
+
+// DB_HOST=db.internal DB_PORT=6432
+var cfg Config
+_ = envvalidator.Validate(&cfg)
+```
+
 ### Batch Error Reporting
 
 ```go
@@ -71,12 +119,15 @@ if err := envvalidator.Validate(&cfg); err != nil {
 - `time.Duration` — Go duration strings (e.g., `"30s"`, `"5m"`, `"1h30m"`)
 - `url.URL` — parsed via `url.Parse`
 - Any type implementing `encoding.TextUnmarshaler`
+- Slices of any of the above scalar types (e.g. `[]string`, `[]int`, `[]bool`)
 
 ### Tag Options
 
 - `required` — field must be set in environment
 - `default=VALUE` — fallback if not set (validated against `choices` if both present)
-- `choices=A|B|C` — restrict to specific values (whitespace around `|` is trimmed)
+- `choices=A|B|C` — restrict to specific values (whitespace around `|` is trimmed; validated per element for slices)
+- `delim=SEP` — element separator for slice fields (default `,`)
+- `envPrefix=PREFIX` — on a nested `struct` or `*struct` field, prepend `PREFIX` to every child variable name
 
 ## API
 
